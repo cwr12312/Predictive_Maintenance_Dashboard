@@ -1,0 +1,211 @@
+/* =========================================================================
+   Industrial Predictive Maintenance Dashboard — Dark / Industrial-Blue Theme
+   ========================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+:root{
+  --bg-primary:#0B1220;
+  --bg-secondary:#111A2E;
+  --bg-card:#152238;
+  --bg-card-hover:#1B2C4A;
+  --border:#22314D;
+  --accent-blue:#2E8FFF;
+  --accent-blue-light:#5CB2FF;
+  --accent-cyan:#22D3EE;
+  --accent-green:#22C55E;
+  --accent-amber:#F59E0B;
+  --accent-red:#EF4444;
+  --text-primary:#E8EEFC;
+  --text-secondary:#93A2C2;
+  --text-muted:#5E6C8C;
+}
+
+html, body, [class*="css"]{
+  font-family:'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
+/* ---- App background --------------------------------------------------- */
+.stApp{
+  background:
+    radial-gradient(circle at 15% 0%, rgba(46,143,255,0.10), transparent 45%),
+    radial-gradient(circle at 85% 15%, rgba(34,211,238,0.07), transparent 40%),
+    var(--bg-primary) !important;
+  color: var(--text-primary);
+}
+
+section[data-testid="stSidebar"]{
+  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+  border-right: 1px solid var(--border);
+}
+section[data-testid="stSidebar"] * { color: var(--text-primary); }
+
+/* ---- Headings ----------------------------------------------------------*/
+h1, h2, h3{
+  font-weight:800 !important;
+  letter-spacing:-0.02em;
+  color: var(--text-primary) !important;
+}
+h1{ font-size: 2.0rem !important; }
+h2{ font-size: 1.4rem !important; margin-top: 0.4rem !important;}
+h3{ font-size: 1.1rem !important; color: var(--accent-blue-light) !important; }
+
+hr{ border-color: var(--border) !important; }
+
+/* ---- KPI cards -----------------------------------------------------------*/
+.kpi-card{
+  background: linear-gradient(155deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+  transition: all .25s ease;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.25);
+}
+.kpi-card:hover{
+  transform: translateY(-3px);
+  border-color: var(--accent-blue);
+  box-shadow: 0 10px 28px rgba(46,143,255,0.18);
+}
+.kpi-card::before{
+  content:"";
+  position:absolute; top:0; left:0; right:0; height:3px;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));
+}
+.kpi-label{
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.kpi-value{
+  color: var(--text-primary);
+  font-size: 1.9rem;
+  font-weight: 800;
+  line-height: 1.1;
+  font-family:'JetBrains Mono', monospace;
+}
+.kpi-sub{
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  margin-top: 4px;
+}
+.kpi-delta-up{ color: var(--accent-green); font-weight:700; font-size:0.8rem;}
+.kpi-delta-down{ color: var(--accent-red); font-weight:700; font-size:0.8rem;}
+
+/* ---- Generic panel card ---------------------------------------------- */
+.panel-card{
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 22px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.22);
+}
+
+/* ---- Badges ------------------------------------------------------------*/
+.badge{
+  display:inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing:0.03em;
+}
+.badge-blue{ background: rgba(46,143,255,0.15); color: var(--accent-blue-light); border:1px solid rgba(46,143,255,0.35);}
+.badge-green{ background: rgba(34,197,94,0.15); color: var(--accent-green); border:1px solid rgba(34,197,94,0.35);}
+.badge-amber{ background: rgba(245,158,11,0.15); color: var(--accent-amber); border:1px solid rgba(245,158,11,0.35);}
+.badge-red{ background: rgba(239,68,68,0.15); color: var(--accent-red); border:1px solid rgba(239,68,68,0.35);}
+
+/* ---- Rank medals ---------------------------------------------------------*/
+.rank-gold{ color:#FFD700; font-size:1.3rem;}
+.rank-silver{ color:#C0C0C0; font-size:1.3rem;}
+.rank-bronze{ color:#CD7F32; font-size:1.3rem;}
+
+/* ---- Alert / recommendation cards ------------------------------------ */
+.alert-card{
+  border-radius:14px;
+  padding: 18px 20px;
+  border-left: 5px solid var(--accent-blue);
+  background: var(--bg-card);
+  margin-bottom: 14px;
+}
+.alert-card.risk-low{ border-left-color: var(--accent-green); }
+.alert-card.risk-medium{ border-left-color: var(--accent-amber); }
+.alert-card.risk-high{ border-left-color: var(--accent-red); }
+.alert-card.risk-critical{ border-left-color:#B91C1C; background: linear-gradient(90deg, rgba(185,28,28,0.12), var(--bg-card)); }
+.alert-title{ font-weight:800; font-size:1.05rem; margin-bottom:6px;}
+.alert-item{ color: var(--text-secondary); font-size:0.92rem; margin: 3px 0;}
+
+/* ---- Buttons ------------------------------------------------------------*/
+.stButton>button, .stDownloadButton>button{
+  background: linear-gradient(135deg, var(--accent-blue), #1C6FE0);
+  color:white; border:none; border-radius:10px; font-weight:700;
+  padding: 0.55rem 1.2rem;
+  transition: all .2s ease;
+}
+.stButton>button:hover, .stDownloadButton>button:hover{
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+/* ---- Tabs ----------------------------------------------------------------*/
+.stTabs [data-baseweb="tab-list"]{ gap: 4px; }
+.stTabs [data-baseweb="tab"]{
+  background: var(--bg-card);
+  border-radius: 10px 10px 0 0;
+  color: var(--text-secondary);
+  padding: 8px 18px;
+  border: 1px solid var(--border);
+  border-bottom:none;
+}
+.stTabs [aria-selected="true"]{
+  color: var(--text-primary) !important;
+  background: var(--bg-card-hover) !important;
+  border-color: var(--accent-blue) !important;
+}
+
+/* ---- DataFrames / tables ---------------------------------------------- */
+[data-testid="stDataFrame"]{
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* ---- Metric widget override -------------------------------------------- */
+[data-testid="stMetric"]{
+  background: var(--bg-card);
+  border:1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+[data-testid="stMetricLabel"]{ color: var(--text-secondary) !important; }
+[data-testid="stMetricValue"]{ color: var(--text-primary) !important; font-family:'JetBrains Mono', monospace; }
+
+/* ---- Divider / section title ------------------------------------------- */
+.section-title{
+  display:flex; align-items:center; gap:10px;
+  margin: 6px 0 14px 0;
+}
+.section-title .bar{
+  width:5px; height:24px; border-radius:4px;
+  background: linear-gradient(180deg, var(--accent-blue), var(--accent-cyan));
+}
+.section-title h3{ margin:0 !important; }
+
+/* ---- Footer --------------------------------------------------------------*/
+.app-footer{
+  text-align:center;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  padding: 24px 0 8px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 30px;
+}
+
+/* Hide default streamlit chrome for a more "product" feel */
+#MainMenu {visibility:hidden;}
+footer {visibility:hidden;}
+header[data-testid="stHeader"]{ background: transparent; }
