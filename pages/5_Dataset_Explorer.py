@@ -26,7 +26,7 @@ st.warning(
 
 @st.cache_data(show_spinner=False)
 def get_dataset():
-    return generate_synthetic_dataset(n_per_class=120, seed=11)
+    return generate_synthetic_dataset(n_per_class=230, seed=11)
 
 df = get_dataset()
 
