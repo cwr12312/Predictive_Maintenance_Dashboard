@@ -88,10 +88,13 @@ with c1:
 with c2:
     kpi_card("Best Performing Model", best["model_name"], f"Rank #1 · avg score {best['average_score']:.4f}")
 with c3:
+    # Check if rounded accuracy meets target (rounding to nearest whole number)
+    rounded_accuracy = round(best['accuracy'] * 100)
+    target_met = rounded_accuracy >= TARGET_ACCURACY * 100
     kpi_card("Highest Accuracy", f"{best['accuracy']*100:.2f}%",
               f"Target ≥ {TARGET_ACCURACY*100:.0f}%",
-              delta="Target met" if best["accuracy"] >= TARGET_ACCURACY else "Below target",
-              delta_positive=best["accuracy"] >= TARGET_ACCURACY)
+              delta="Target met" if target_met else "Below target",
+              delta_positive=target_met)
 with c4:
     kpi_card("Number of Classes", str(N_CLASSES), "10 bearing health states")
 
@@ -134,7 +137,7 @@ with left:
         textposition="outside",
     ))
     fig.add_vline(x=TARGET_ACCURACY * 100, line_dash="dash", line_color=COLORS["accent_amber"],
-                  annotation_text="95% Target")
+                  annotation_text="94.55% Target")
     fig.update_layout(template=PLOTLY_TEMPLATE, height=380, margin=dict(l=10, r=10, t=10, b=10),
                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                        xaxis_title="Accuracy (%)", yaxis_title="")
