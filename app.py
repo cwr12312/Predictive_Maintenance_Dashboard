@@ -1,3 +1,4 @@
+
 """
 app.py
 ======
@@ -34,7 +35,6 @@ with st.sidebar:
     st.markdown(
         f"""
         <div style="text-align:center;padding:10px 0 18px 0;">
-            <div style="font-size:2.2rem;">⚙️</div>
             <div style="font-weight:800;font-size:1.05rem;color:{COLORS['text_primary']};">
                 PREDICTIVE MAINTENANCE
             </div>
@@ -124,26 +124,11 @@ st.write("")
 # --------------------------------------------------------------------------
 # CHARTS
 # --------------------------------------------------------------------------
-left, right = st.columns([1.3, 1])
 
-with left:
-    section_title("Model Accuracy Comparison")
-    df_sorted = metrics.sort_values("accuracy", ascending=True)
-    colors = [COLORS["accent_green"] if m == best["model_name"] else COLORS["accent_blue"]
-              for m in df_sorted["model_name"]]
-    fig = go.Figure(go.Bar(
-        x=df_sorted["accuracy"] * 100, y=df_sorted["model_name"], orientation="h",
-        marker_color=colors, text=[f"{v*100:.2f}%" for v in df_sorted["accuracy"]],
-        textposition="outside",
-    ))
-    fig.add_vline(x=TARGET_ACCURACY * 100, line_dash="dash", line_color=COLORS["accent_amber"],
-                  annotation_text="94.55% Target")
-    fig.update_layout(template=PLOTLY_TEMPLATE, height=380, margin=dict(l=10, r=10, t=10, b=10),
-                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                       xaxis_title="Accuracy (%)", yaxis_title="")
-    st.plotly_chart(fig, use_container_width=True)
+# Model Type Distribution centered alone
+left, center, right = st.columns([1, 1.3, 1])
 
-with right:
+with center:
     section_title("Model Type Distribution")
     type_counts = metrics["model_type"].value_counts().reset_index()
     type_counts.columns = ["model_type", "count"]
@@ -153,13 +138,5 @@ with right:
     fig2.update_layout(template=PLOTLY_TEMPLATE, height=380, margin=dict(l=10, r=10, t=10, b=10),
                         paper_bgcolor="rgba(0,0,0,0)", showlegend=False)
     st.plotly_chart(fig2, use_container_width=True)
-
-section_title("All Models — Snapshot")
-display_df = metrics[["model_name", "model_type", "framework", "accuracy", "precision",
-                       "recall", "f1_score", "computed_rank"]].copy()
-display_df.columns = ["Model", "Type", "Framework", "Accuracy", "Precision", "Recall", "F1 Score", "Rank"]
-for c in ["Accuracy", "Precision", "Recall", "F1 Score"]:
-    display_df[c] = (display_df[c] * 100).round(2).astype(str) + "%"
-st.dataframe(display_df.sort_values("Rank"), use_container_width=True, hide_index=True)
 
 footer()

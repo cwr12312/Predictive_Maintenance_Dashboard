@@ -43,8 +43,8 @@ st.write("")
 # --------------------------------------------------------------------------
 # CHART GRID
 # --------------------------------------------------------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    [" Bar Comparison", " Radar Chart", " Heatmap", " Scatter", " Bubble"]
+tab1, tab4, tab5 = st.tabs(
+    [" Bar Comparison", " Scatter", " Bubble"]
 )
 
 metric_cols = ["accuracy", "precision", "recall", "f1_score"]
@@ -58,27 +58,6 @@ with tab1:
     fig.update_layout(barmode="group", template=PLOTLY_TEMPLATE, height=460,
                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                        yaxis_title="Score (%)", legend_title="Metric")
-    st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    section_title("Radar Chart — Multi-Metric Profile")
-    fig = go.Figure()
-    for _, row in metrics.iterrows():
-        vals = [row[m] * 100 for m in metric_cols] + [row[metric_cols[0]] * 100]
-        fig.add_trace(go.Scatterpolar(r=vals, theta=metric_labels + [metric_labels[0]],
-                                       fill="toself", name=row["model_name"], opacity=0.55))
-    fig.update_layout(template=PLOTLY_TEMPLATE, height=520,
-                       polar=dict(radialaxis=dict(visible=True, range=[85, 100])),
-                       paper_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, use_container_width=True)
-
-with tab3:
-    section_title("Performance Heatmap")
-    heat_df = metrics.set_index("model_name")[metric_cols] * 100
-    heat_df.columns = metric_labels
-    fig = px.imshow(heat_df.values, x=heat_df.columns, y=heat_df.index, text_auto=".2f",
-                     color_continuous_scale="Blues", aspect="auto")
-    fig.update_layout(template=PLOTLY_TEMPLATE, height=420, paper_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig, use_container_width=True)
 
 with tab4:
