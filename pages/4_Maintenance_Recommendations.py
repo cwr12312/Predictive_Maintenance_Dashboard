@@ -3,11 +3,12 @@
 import streamlit as st
 
 from config import PROJECT_SHORT_TITLE, CLASS_NAMES, CLASS_DISPLAY_NAMES, RISK_COLORS
-from utils.styling import inject_css, page_header, section_title, alert_card, footer
+from utils.styling import inject_css, page_header, section_title, alert_card, footer, render_sidebar
 from utils.maintenance import get_recommendation, RECOMMENDATIONS
 
 st.set_page_config(page_title=f"Maintenance Recommendations · {PROJECT_SHORT_TITLE}", layout="wide")
 inject_css()
+render_sidebar(active="maintenance")
 page_header("Maintenance Recommendations", "Actionable guidance mapped to each predicted fault condition")
 
 section_title("Select a Fault Class")

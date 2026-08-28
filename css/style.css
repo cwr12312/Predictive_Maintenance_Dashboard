@@ -5,10 +5,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
 
 :root{
-  --bg-primary:#020e0f;
-  --bg-secondary:#294a97;
+  --bg-primary:#0B1220;
+  --bg-secondary:#111A2E;
   --bg-card:#152238;
-  --bg-card-hover:#668eca;
+  --bg-card-hover:#1B2C4A;
   --border:#22314D;
   --accent-blue:#2E8FFF;
   --accent-blue-light:#5CB2FF;
@@ -17,8 +17,8 @@
   --accent-amber:#F59E0B;
   --accent-red:#EF4444;
   --text-primary:#E8EEFC;
-  --text-secondary:#d2d4f0;
-  --text-muted:#ebf0f1;
+  --text-secondary:#93A2C2;
+  --text-muted:#5E6C8C;
 }
 
 html, body, [class*="css"]{
@@ -209,3 +209,10 @@ hr{ border-color: var(--border) !important; }
 #MainMenu {visibility:hidden;}
 footer {visibility:hidden;}
 header[data-testid="stHeader"]{ background: transparent; }
+
+/* ---- Root Cause Reasoning / Expander Headers -------------------------- */
+div[data-testid="stExpander"] details summary {
+  background-color: #D6EEFF !important; /* Light blue */
+  color: #0B3D66 !important;            /* Dark blue text */
+  border-radius: 8px !important;
+}

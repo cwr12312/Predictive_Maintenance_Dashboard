@@ -7,7 +7,7 @@ stays consistent without duplicating markup.
 """
 
 import streamlit as st
-from config import CSS_DIR, COLORS
+from config import CSS_DIR, COLORS, APP_NAME, DESIGNER_CREDIT
 
 
 def inject_css():
@@ -84,12 +84,67 @@ def alert_card(title: str, items: list[str], risk: str = "low"):
 
 
 def footer():
+    """
+    Renders the single, consistent footer for every page. Per project
+    requirements, the "Designed by" credit appears ONLY here — nowhere
+    else in the sidebar, navigation, or page headers.
+    """
     st.markdown(
-        """
+        f"""
         <div class="app-footer">
             Industrial Predictive Maintenance System for Bearing Fault Diagnosis &middot;
             Built with Streamlit, TensorFlow, PyTorch &amp; Plotly
+            <br>
+            <span style="opacity:0.85;">Designed by {DESIGNER_CREDIT}</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_sidebar(active: str = ""):
+    """
+    Renders the shared sidebar: brand header, then the primary navigation
+    (App, About, Model Comparison, Live Prediction, Maintenance
+    Recommendations, Dataset Explorer, Model Performance), then the live
+    model-load status at the bottom. Called identically from every page so
+    the sidebar never changes shape as the user navigates. No separate
+    LLM/AI page — that functionality lives inside the Live Prediction page
+    itself.
+    """
+    from utils.model_loader import load_all_models  # local import avoids circular import
+
+    with st.sidebar:
+        st.markdown(
+            f"""
+            <div style="text-align:center;padding:10px 0 18px 0;">
+                <div style="font-weight:800;font-size:1.05rem;color:{COLORS['text_primary']};">
+                    {APP_NAME.upper()}
+                </div>
+                <div style="font-size:0.72rem;color:{COLORS['accent_blue_light']};
+                            letter-spacing:0.1em;">BEARING FAULT DIAGNOSTICS</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("---")
+        st.caption("NAVIGATION")
+        st.page_link("app.py", label="App")
+        st.page_link("pages/1_About.py", label="About")
+        st.page_link("pages/1_Model_Comparison.py", label="Model Comparison")
+        st.page_link("pages/2_Live_Prediction.py", label="Live Prediction")
+        st.page_link("pages/4_Maintenance_Recommendations.py", label="Maintenance Recommendations")
+        st.page_link("pages/5_Dataset_Explorer.py", label="Dataset Explorer")
+        st.page_link("pages/6_Model_Performance.py", label="Model Performance")
+        st.markdown("---")
+        st.caption("SYSTEM STATUS")
+        registry = load_all_models()
+        n_ok = len(registry["models"])
+        n_err = len(registry["errors"])
+        if n_err == 0:
+            st.success(f"**{n_ok}/6 Models Loaded**")
+        else:
+            st.warning(f"**{n_ok}/6 Models Loaded** &middot; {n_err} failed")
+            with st.expander("Load errors"):
+                for name, msg in registry["errors"].items():
+                    st.caption(f"**{name}**: {msg}")

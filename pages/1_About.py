@@ -1,4 +1,5 @@
-"""Page 8 (nav) — About: project metadata, objectives, methodology, architecture, credits."""
+"""About page  project metadata, objectives, methodology, architecture, credits.
+Positioned near the top of the navigation, directly after "App"."""
 
 import streamlit as st
 
@@ -7,10 +8,11 @@ from config import (
     SYSTEM_ARCHITECTURE, DATASET_INFO, DEVELOPMENT_TOOLS,
     MODEL_REGISTRY,
 )
-from utils.styling import inject_css, page_header, section_title, footer
+from utils.styling import inject_css, page_header, section_title, footer, render_sidebar
 
 st.set_page_config(page_title=f"About · {PROJECT_SHORT_TITLE}", layout="wide")
 inject_css()
+render_sidebar(active="about")
 page_header("About This Project", "Capstone project metadata and technical documentation")
 
 st.markdown(f"### {PROJECT_TITLE}")

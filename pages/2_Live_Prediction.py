@@ -1,6 +1,7 @@
-"""Page 3 (nav) — Live Prediction: upload CSV or enter features manually, run any of the six models."""
+"""Page 3 (nav) Live Prediction: upload CSV or enter features manually, run any of the six models."""
 
 import time
+import datetime
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -13,17 +14,73 @@ from config import (
     PROJECT_SHORT_TITLE, COLORS, PLOTLY_TEMPLATE, MODEL_NAMES, CLASS_NAMES,
     BASE_FEATURES, ALL_FEATURES, FEATURE_DESCRIPTIONS, CLASS_DISPLAY_NAMES,
 )
-from utils.styling import inject_css, page_header, section_title, footer, badge
+from utils.styling import inject_css, page_header, section_title, footer, badge, render_sidebar
 from utils.model_loader import get_model, get_load_errors
 from utils.preprocessing import preprocess_manual_entry, preprocess_csv_upload
 from utils.maintenance import get_recommendation
+from utils.data_loader import load_metrics, best_model_row
+from utils import llm_assistant
 
 st.set_page_config(page_title=f"Live Prediction · {PROJECT_SHORT_TITLE}", layout="wide")
 inject_css()
+render_sidebar(active="live_prediction")
 page_header("Live Prediction", "Run real inference with any of the six trained models")
 
 if "prediction_history" not in st.session_state:
     st.session_state.prediction_history = []
+
+
+# Prediction" — including the rerun triggered by clicking "Generate Report".
+if "live_engineered_df" not in st.session_state:
+    st.session_state.live_engineered_df = None
+if "live_scaled" not in st.session_state:
+    st.session_state.live_scaled = None
+
+
+# --------------------------------------------------------------------------
+# REPORT MODAL / POP-UP
+# Genuine Streamlit modal (st.dialog) triggered from a button in the
+# explanation section below. Shows a professional report built ONLY from
+# the real, current prediction (plus a real session summary) — never
+# invented data — with a download button. Kept inside this Live Prediction
+# page (no separate page is used).
+# --------------------------------------------------------------------------
+@st.dialog("Predictions Report", width="large")
+def show_report_modal(predicted_display, confidence, model_name, risk, actions):
+    generated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.caption(f"Generated {generated_at}")
+
+    metrics_df = load_metrics()
+    best = best_model_row(metrics_df)
+
+    # Real session summary (never fabricated) — counts drawn from this
+    # session's actual logged predictions, if any exist.
+    session_summary_lines = None
+    hist = st.session_state.get("prediction_history", [])
+    if hist:
+        counts: dict[str, int] = {}
+        risk_counts: dict[str, int] = {}
+        for h in hist:
+            counts[h.get("Prediction", "Unknown")] = counts.get(h.get("Prediction", "Unknown"), 0) + 1
+            risk_counts[h.get("Risk", "Unknown")] = risk_counts.get(h.get("Risk", "Unknown"), 0) + 1
+        session_summary_lines = [f"{len(hist)} prediction(s) logged this session"]
+        session_summary_lines += [f"{n}x {name}" for name, n in sorted(counts.items(), key=lambda x: -x[1])]
+        session_summary_lines += [f"Risk breakdown: " + ", ".join(f"{n}x {r}" for r, n in risk_counts.items())]
+
+    report_md, mode = llm_assistant.generate_maintenance_report(
+        "Live Prediction Sample", predicted_display, confidence, model_name,
+        risk, actions, best["model_name"], best["accuracy"],
+        session_summary_lines=session_summary_lines,
+    )
+    st.markdown(report_md)
+    st.download_button(
+        "⬇ Download Report (.md)", report_md,
+        file_name=f"prediction_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+        key="dl_report_modal",
+    )
+    if st.button("Close", key="close_report_modal"):
+        st.rerun()
+
 
 # --------------------------------------------------------------------------
 # XAI / EXPLAINABILITY (USING FEATURE IMPORTANCE FROM VALUES)
@@ -164,7 +221,7 @@ def render_xai_explanation(
     st.markdown('<div class="xai-container">', unsafe_allow_html=True)
     
     # Header - only this is orange
-    st.markdown('<div class="xai-header">EXPLANABLE AI: PREDICTION EXPLAINED</div>', unsafe_allow_html=True)
+    st.markdown('<div class="xai-header">EXPLANABLE AI</div>', unsafe_allow_html=True)
 
     # Get the display name safely using the helper function
     predicted_display = get_class_display_name(predicted_class)
@@ -196,15 +253,15 @@ def render_xai_explanation(
             # Use feature importance based on actual values
             feature_importance, _ = calculate_feature_importance(raw_values, scaled_sample)
             shap_values = feature_importance
-            st.caption("ℹ️ Using feature importance based on input values")
+            st.caption(" Using feature importance based on input values")
         else:
             # Fallback - create random importance
             shap_values = np.random.randn(len(ALL_FEATURES)) * 0.1
-            st.caption("ℹ️ Using estimated feature importance")
+            st.caption(" Using estimated feature importance")
     except Exception as e:
         # If all else fails, create random importance
         shap_values = np.random.randn(len(ALL_FEATURES)) * 0.1
-        st.caption("ℹ️ Using estimated feature importance")
+        st.caption("Using estimated feature importance")
 
     # Create explanation dataframe
     explanation_df = pd.DataFrame({
@@ -224,7 +281,9 @@ def render_xai_explanation(
 
     top_features = explanation_df.head(8).copy()
 
-    # Get positive and negative contributions
+    # Get positive and negative contributions (kept internally only to
+    # ground the Plain Language Explanation below with real feature names —
+    # no technical chart/table/reasons list is shown to the user anymore).
     positive = (
         explanation_df[explanation_df["SHAP Value"] > 0]
         .sort_values("SHAP Value", ascending=False)
@@ -237,220 +296,145 @@ def render_xai_explanation(
         .head(5)
     )
 
-    # ------------------------------------------------------------------
-    # PLAIN-ENGLISH EXPLANATION
-    # ------------------------------------------------------------------
-    # Get top 3 supporting features for the explanation
-    support_features = positive.head(3)
-    support_names = support_features["Feature"].tolist()
-    
-    # Build the plain-English explanation
-    explanation_text = f"The model predicted **{predicted_display}** with **{confidence * 100:.2f}%** confidence. "
-    
-    if len(support_names) > 0:
-        if len(support_names) == 1:
-            explanation_text += f"The prediction was primarily influenced by the input's **{support_names[0]}**."
-        elif len(support_names) == 2:
-            explanation_text += f"The prediction was primarily influenced by the input's **{support_names[0]}** and **{support_names[1]}**."
-        else:
-            explanation_text += f"The prediction was primarily influenced by the input's **{support_names[0]}**, **{support_names[1]}**, and **{support_names[2]}**."
-        
-        explanation_text += " These characteristics contributed evidence toward the predicted fault class."
-    else:
-        # If no positive features, use top features overall
-        top_feature_names = top_features.head(3)["Feature"].tolist()
-        if len(top_feature_names) > 0:
-            if len(top_feature_names) == 1:
-                explanation_text += f"The prediction was primarily influenced by the input's **{top_feature_names[0]}**."
-            elif len(top_feature_names) == 2:
-                explanation_text += f"The prediction was primarily influenced by the input's **{top_feature_names[0]}** and **{top_feature_names[1]}**."
-            else:
-                explanation_text += f"The prediction was primarily influenced by the input's **{top_feature_names[0]}**, **{top_feature_names[1]}**, and **{top_feature_names[2]}**."
-            explanation_text += " These characteristics contributed evidence toward the predicted fault class."
-        else:
-            explanation_text += "The prediction was based on the overall feature pattern detected by the model."
 
+    # ------------------------------------------------------------------
+    top_for_ai = [(r["Feature"], r["SHAP Value"]) for _, r in top_features.head(5).iterrows()]
+    plain_text, plain_mode = llm_assistant.explain_prediction_plain_language(
+        predicted_display, confidence, top_for_ai
+    )
     st.markdown(f"""
-    <div style="font-size: 15px; line-height: 1.6; color: #E0E0E0; margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px;">
-        {explanation_text}
+    <div style="font-size: 15px; line-height: 1.7; color: #E0E0E0; margin: 10px 0 20px 0; padding: 18px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+        {plain_text}
     </div>
     """, unsafe_allow_html=True)
 
-    # ------------------------------------------------------------------
-    # SPECIFIC REASONS
-    # ------------------------------------------------------------------
-    st.markdown('<div class="xai-subheader">The main reasons were:</div>', unsafe_allow_html=True)
+    # Real class name (e.g. "IR_014") needed to look up maintenance rules
+    raw_class_name = None
+    try:
+        idx = int(predicted_class)
+        if 0 <= idx < len(CLASS_NAMES):
+            raw_class_name = CLASS_NAMES[idx]
+    except (TypeError, ValueError):
+        pass
+    rec = get_recommendation(raw_class_name or CLASS_NAMES[0], confidence)
+    family = llm_assistant.family_for_display(predicted_display)
 
-    # Display specific reasons for supporting features
-    if len(positive) > 0:
-        for _, row in positive.iterrows():
-            feature_name = row['Feature']
-            shap_val = row['SHAP Value']
-            
-            # Get the actual input value if available
-            input_val = ""
-            if raw_values is not None and feature_name in raw_values:
-                try:
-                    val = raw_values[feature_name]
-                    if isinstance(val, (int, float)):
-                        input_val = f" (value: {val:.4f})"
-                except:
-                    pass
-            
-            # Create a human-readable reason
-            reason = f"**{feature_name}** contributed strongly because its value pushed the model toward the {predicted_display} class.{input_val}"
-            
-            st.markdown(f"""
-            <div class="xai-reason">
-                ✅ {reason} <span class="support-badge">+{shap_val:.3f}</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-    if len(negative) > 0:
-        for _, row in negative.head(3).iterrows():
-            feature_name = row['Feature']
-            shap_val = row['SHAP Value']
-            
-            # Get the actual input value if available
-            input_val = ""
-            if raw_values is not None and feature_name in raw_values:
-                try:
-                    val = raw_values[feature_name]
-                    if isinstance(val, (int, float)):
-                        input_val = f" (value: {val:.4f})"
-                except:
-                    pass
-            
-            reason = f"**{feature_name}** contributed negatively, indicating its value helped distinguish this fault from other conditions.{input_val}"
-            
-            st.markdown(f"""
-            <div class="xai-reason">
-                ⚠️ {reason} <span class="oppose-badge">{shap_val:.3f}</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # If no positive or negative features, show top features instead
-    if len(positive) == 0 and len(negative) == 0:
-        for _, row in top_features.head(5).iterrows():
-            feature_name = row['Feature']
-            shap_val = row['SHAP Value']
-            
-            input_val = ""
-            if raw_values is not None and feature_name in raw_values:
-                try:
-                    val = raw_values[feature_name]
-                    if isinstance(val, (int, float)):
-                        input_val = f" (value: {val:.4f})"
-                except:
-                    pass
-            
-            direction = "supported" if shap_val > 0 else "opposed"
-            emoji = "✅" if shap_val > 0 else "⚠️"
-            badge_class = "support-badge" if shap_val > 0 else "oppose-badge"
-            
-            st.markdown(f"""
-            <div class="xai-reason">
-                {emoji} **{feature_name}** {direction} the prediction with a contribution of {shap_val:.3f}.{input_val}
-                <span class="{badge_class}">{shap_val:+.3f}</span>
-            </div>
-            """, unsafe_allow_html=True)
+    feat_ctx = {
+        "rms": float(raw_values.get("rms")) if raw_values and isinstance(raw_values.get("rms"), (int, float)) else None,
+        "kurtosis": float(raw_values.get("kurtosis")) if raw_values and isinstance(raw_values.get("kurtosis"), (int, float)) else None,
+        "crest": float(raw_values.get("crest")) if raw_values and isinstance(raw_values.get("crest"), (int, float)) else None,
+    }
 
     # ------------------------------------------------------------------
-    # FEATURE CONTRIBUTION CHART
+    # ROOT CAUSE REASONING (decision support, not a diagnosis)
+    # Combines the real vibration features above with structured sensor
+    # data and an optional technician note / maintenance log entry.
     # ------------------------------------------------------------------
-    st.markdown('<div class="xai-subheader" style="margin-top: 20px;">Feature contribution to prediction</div>', unsafe_allow_html=True)
+    with st.expander(" ROOT CAUSE REASONING(decision support)"):
+        st.caption("Combines structured sensor data (RMS, kurtosis, crest factor) with an "
+                   "optional maintenance-log note to suggest possible causes. This is "
+                   "decision support for a human to verify — never a guaranteed diagnosis.")
+        tech_note = st.text_area(
+            "Technician note / maintenance log entry (optional)", key=f"tech_note_{model_name}",
+            placeholder="e.g. Bearing was replaced 3 months ago; unusual noise reported last week.",
+        )
+        if st.button("Analyze possible root causes", key=f"root_cause_btn_{model_name}"):
+            rc_text, rc_mode = llm_assistant.root_cause_reasoning(
+                predicted_display, confidence, feat_ctx, tech_note,
+            )
+            st.markdown(rc_text)
 
-    # Prepare data for the chart
-    chart_df = top_features.copy()
-    chart_df = chart_df.sort_values("SHAP Value", ascending=True)
+    # ------------------------------------------------------------------
+    # MINE UNSTRUCTURED MAINTENANCE HISTORY
+    # Extracts recurring faults / failure events from free-text technician
+    # notes or maintenance logs — presented as candidate structure for a
+    # human to review, not as auto-generated ground-truth labels.
+    # ------------------------------------------------------------------
+    with st.expander("Mine Maintenance History (extract structured info from notes)"):
+        st.caption("Paste free-text maintenance notes or technician logs. This extracts "
+                   "recurring faults and failure events to help spot patterns — useful as a "
+                   "starting point for retroactive labeling, always subject to human review.")
+        notes_text = st.text_area(
+            "Maintenance notes / technician log", key=f"notes_mine_{model_name}", height=140,
+            value=("03/12: Bearing replaced due to inner race pitting.\n"
+                   "14/12: Unusual vibration noted during routine round.\n"
+                   "02/01: Recurring high-frequency noise near drive-end bearing."),
+        )
+        if st.button("Extract structured info", key=f"mine_notes_btn_{model_name}"):
+            if not notes_text.strip():
+                st.warning("Paste some maintenance notes above first.")
+            else:
+                mined_text, mined_mode = llm_assistant.summarize_maintenance_notes(notes_text)
+                st.markdown(mined_text)
 
-    # Create color mapping
-    colors = ['#FF1744' if val < 0 else '#00C853' for val in chart_df["SHAP Value"]]
+    # ------------------------------------------------------------------
+    # SCENARIO GENERATION & DOCUMENTATION
+    # Describes the current predicted fault condition in natural language,
+    # for technician training, testing, or dashboard documentation.
+    # ------------------------------------------------------------------
+    with st.expander("Generate Fault Scenario (documentation / training)"):
+        st.caption("Generates a short natural-language scenario describing how this predicted "
+                   "fault might develop and be noticed on a factory floor.")
+        if st.button("Generate scenario", key=f"scenario_btn_{model_name}"):
+            scenario_text, scenario_mode = llm_assistant.generate_fault_scenario(
+                predicted_display, family, rec["risk"]
+            )
+            st.markdown(scenario_text)
 
-    # Create the horizontal bar chart
-    fig_xai = go.Figure()
+    # ------------------------------------------------------------------
+    # MULTIMODAL FUSION (implemented, real — not a future placeholder)
+    # The six trained models only ever see vibration features; there is no
+    # thermal or acoustic ML model in this project, and none is claimed
+    # here. This IS a real, working reasoning layer: it fuses the real
+    # vibration prediction above with whatever additional modality
+    # readings you enter right now into one combined assessment.
+    # ------------------------------------------------------------------
+    with st.expander("Multimodal Fusion (vibration + thermal + acoustic + text)"):
+        st.caption("Combine this real vibration-model prediction with an optional thermal "
+                   "reading, an acoustic note, and/or maintenance text into one fused, "
+                   "decision-support assessment. Leave a field blank to exclude that modality "
+                   "— nothing is invented on your behalf.")
+        mm1, mm2 = st.columns(2)
+        with mm1:
+            use_thermal = st.checkbox("Include thermal reading", key=f"mm_thermal_on_{model_name}")
+            thermal_temp = st.number_input(
+                "Measured temperature (°C)", value=45.0, key=f"mm_temp_{model_name}",
+                disabled=not use_thermal,
+            )
+            thermal_baseline = st.number_input(
+                "Normal baseline temperature (°C)", value=40.0, key=f"mm_base_{model_name}",
+                disabled=not use_thermal,
+            )
+        with mm2:
+            acoustic_note_mm = st.text_area(
+                "Acoustic note (optional)", key=f"mm_acoustic_{model_name}", height=80,
+                placeholder="e.g. Technician reports a rhythmic knocking sound near the bearing housing.",
+            )
+            maint_note_mm = st.text_area(
+                "Maintenance / text note (optional)", key=f"mm_text_{model_name}", height=80,
+                placeholder="e.g. Last serviced 6 months ago; no prior issues logged.",
+            )
+        if st.button("Fuse modalities", key=f"mm_fuse_btn_{model_name}"):
+            fused_text, fused_mode = llm_assistant.multimodal_fusion_reasoning(
+                predicted_display, confidence, family, rec["risk"],
+                thermal_temp_c=thermal_temp if use_thermal else None,
+                thermal_baseline_c=thermal_baseline if use_thermal else None,
+                acoustic_note=acoustic_note_mm,
+                maintenance_note=maint_note_mm,
+            )
+            st.markdown(fused_text)
 
-    fig_xai.add_trace(go.Bar(
-        x=chart_df["SHAP Value"],
-        y=chart_df["Feature"],
-        orientation='h',
-        marker_color=colors,
-        text=[f"{val:+.3f}" for val in chart_df["SHAP Value"]],
-        textposition='outside',
-        textfont=dict(color='white', size=12),
-        hovertemplate='<b>%{y}</b><br>Contribution: %{x:+.3f}<extra></extra>'
-    ))
-
-    # Add vertical line at 0
-    fig_xai.add_vline(
-        x=0,
-        line_width=2,
-        line_dash="dash",
-        line_color="white",
-        opacity=0.7
-    )
-
-    fig_xai.update_layout(
-        template=PLOTLY_TEMPLATE,
-        height=400,
-        margin=dict(l=150, r=80, t=30, b=20),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis_title="Feature Contribution",
-        yaxis_title="",
-        xaxis=dict(
-            gridcolor='rgba(255,255,255,0.1)',
-            zeroline=False,
-        ),
-        yaxis=dict(
-            gridcolor='rgba(255,255,255,0.1)',
-            autorange='reversed',
-        ),
-        showlegend=False,
-        font=dict(color='#E0E0E0'),
-    )
-
-    st.plotly_chart(fig_xai, use_container_width=True)
-
-    # Legend
-    st.markdown("""
-    <div style="display: flex; justify-content: center; gap: 30px; margin-top: 10px; font-size: 13px; color: #B0B0B0;">
-        <span>🟢 <span style="color: #00C853;">Supports prediction</span></span>
-        <span>🔴 <span style="color: #FF1744;">Opposes prediction</span></span>
-    </div>
-    """, unsafe_allow_html=True)
+    # ------------------------------------------------------------------
+    # AUTOMATED REPORTING — opens the modal/pop-up defined above
+    # (show_report_modal), including a real session summary when this
+    # session has logged predictions.
+    # ------------------------------------------------------------------
+    st.write("")
+    if st.button("Generate Full Report", key=f"gen_report_{model_name}", type="primary"):
+        show_report_modal(predicted_display, confidence, model_name, rec["risk"], rec["actions"])
 
     # Close container
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # ------------------------------------------------------------------
-    # DETAILED FEATURE TABLE (Expander)
-    # ------------------------------------------------------------------
-    with st.expander("🔎 View detailed feature analysis"):
-        details = top_features[
-            ["Feature", "SHAP Value", "Absolute Impact", "Description"]
-        ].copy()
-        
-        details["SHAP Value"] = details["SHAP Value"].round(5)
-        details["Absolute Impact"] = details["Absolute Impact"].round(5)
-        details["Direction"] = details["SHAP Value"].apply(
-            lambda x: "Supports" if x > 0 else "Opposes"
-        )
-
-        # Add actual input values if available
-        if raw_values is not None:
-            details["Input Value"] = details["Feature"].apply(
-                lambda x: raw_values.get(x, "N/A")
-            )
-            details["Input Value"] = details["Input Value"].apply(
-                lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else x
-            )
-
-        st.dataframe(
-            details,
-            use_container_width=True,
-            hide_index=True,
-        )
 
     return explanation_df
 
@@ -538,8 +522,8 @@ if input_mode == "Manual Feature Entry":
                 f"{feat}", value=float(defaults[feat]), format="%.4f",
                 help=FEATURE_DESCRIPTIONS.get(feat, ""), key=f"manual_{feat}",
             )
-    if st.button("🔮 Run Prediction", type="primary", key="manual_predict"):
-        engineered_df, scaled = preprocess_manual_entry(values)
+    if st.button("Run Prediction", type="primary", key="manual_predict"):
+        st.session_state.live_engineered_df, st.session_state.live_scaled = preprocess_manual_entry(values)
 
 else:
     st.caption("Upload a CSV containing either the 9 base statistical columns "
@@ -551,9 +535,16 @@ else:
             df_raw = pd.read_csv(up)
             st.dataframe(df_raw.head(10), use_container_width=True)
             if st.button("Run Batch Prediction", type="primary", key="csv_predict"):
-                engineered_df, scaled = preprocess_csv_upload(df_raw)
+                st.session_state.live_engineered_df, st.session_state.live_scaled = preprocess_csv_upload(df_raw)
         except Exception as e:
             st.error(f"Could not read/process the uploaded CSV: {e}")
+
+# Read the persisted values (see the session-state init near the top of
+# this file for why this matters: without it, any secondary button click
+# inside the results section — e.g. "Generate Full Report" — would wipe
+# the whole results section on its own rerun before the report could show).
+engineered_df = st.session_state.live_engineered_df
+scaled = st.session_state.live_scaled
 
 # --------------------------------------------------------------------------
 # INFERENCE + RESULTS
@@ -716,10 +707,55 @@ if scaled is not None:
             })
 
 # --------------------------------------------------------------------------
-# HISTORY
+# NATURAL LANGUAGE QUERYING
+# Ask questions about model performance and this session's real logged
+# predictions, instead of digging through charts. Grounded in real data —
+# data/model_metrics.csv and st.session_state.prediction_history — never
+# fabricated. Uses a live LLM if configured, otherwise a rule-based fallback.
 # --------------------------------------------------------------------------
 st.write("")
-section_title("Prediction History (this session)")
+section_title(" Ask About Your Bearings")
+st.caption('Tap a question for an instant answer, or type your own.')
+
+if "nlq_answer" not in st.session_state:
+    st.session_state.nlq_answer = None
+    st.session_state.nlq_mode = None
+    st.session_state.nlq_question_shown = None
+
+def _run_nlq(question: str):
+    """Computes and stores the answer immediately — no separate 'Ask' step."""
+    with st.spinner("Thinking..."):
+        answer, mode = llm_assistant.answer_dashboard_query(
+            question, st.session_state.prediction_history
+        )
+    st.session_state.nlq_answer = answer
+    st.session_state.nlq_mode = mode
+    st.session_state.nlq_question_shown = question
+
+nlq_examples = st.columns(3)
+nlq_examples_text = [
+    "Which bearings are trending toward failure?",
+    "Which model performed best?",
+    "How many predictions have been logged this session?",
+]
+for col, ex in zip(nlq_examples, nlq_examples_text):
+    if col.button(ex, use_container_width=True, key=f"nlq_ex_{ex}"):
+        _run_nlq(ex)
+
+nlq_query = st.text_input("Or type your own question", key="nlq_input",
+                           placeholder="Ask a question about your predictions or models...")
+if st.button("Ask", type="primary", key="nlq_ask") and nlq_query.strip():
+    _run_nlq(nlq_query)
+
+if st.session_state.nlq_answer:
+    st.markdown(f"**Q: {st.session_state.nlq_question_shown}**")
+    st.markdown(st.session_state.nlq_answer)
+
+# --------------------------------------------------------------------------
+# HISTORY (kept as the last section on the page)
+# --------------------------------------------------------------------------
+st.write("")
+section_title("Prediction History")
 if st.session_state.prediction_history:
     hist_df = pd.DataFrame(st.session_state.prediction_history[:50])
     st.dataframe(hist_df, use_container_width=True, hide_index=True)

@@ -7,11 +7,12 @@ import plotly.express as px
 import streamlit as st
 
 from config import PROJECT_SHORT_TITLE, COLORS, PLOTLY_TEMPLATE, MODEL_NAMES
-from utils.styling import inject_css, page_header, section_title, medal, footer
+from utils.styling import inject_css, page_header, section_title, medal, footer, render_sidebar
 from utils.data_loader import load_metrics
 
 st.set_page_config(page_title=f"Model Comparison · {PROJECT_SHORT_TITLE}", layout="wide")
 inject_css()
+render_sidebar(active="model_comparison")
 page_header("Model Comparison", "Ranking the six approved deep-learning & meta-learning models")
 
 metrics = load_metrics().sort_values("computed_rank")

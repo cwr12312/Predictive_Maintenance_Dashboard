@@ -1,11 +1,11 @@
-
 """
 app.py
 ======
 Entry point for the Industrial Predictive Maintenance Dashboard.
-This file renders Page 1 — Executive Dashboard. Pages 2-8 live under
-`pages/` and are auto-discovered by Streamlit's native multipage router.
-
+This is the "App" page the main landing page and it renders the
+Executive Dashboard overview. Additional pages live under `pages/` and
+are auto-discovered by Streamlit's native multipage router; the shared
+sidebar navigation and page order are defined in utils/styling.render_sidebar.
 """
 
 import streamlit as st
@@ -13,12 +13,11 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 from config import (
-    PROJECT_SHORT_TITLE, COLORS, PLOTLY_TEMPLATE, N_CLASSES, N_FEATURES,
+    PROJECT_SHORT_TITLE, APP_NAME, COLORS, PLOTLY_TEMPLATE, N_CLASSES, N_FEATURES,
     TARGET_ACCURACY, DATASET_INFO, MODEL_NAMES,
 )
-from utils.styling import inject_css, page_header, section_title, kpi_card, footer
+from utils.styling import inject_css, page_header, section_title, kpi_card, footer, render_sidebar
 from utils.data_loader import load_metrics, best_model_row
-from utils.model_loader import load_all_models, get_load_errors
 from utils.benchmark import benchmark_all_models
 
 st.set_page_config(
@@ -29,42 +28,9 @@ st.set_page_config(
 inject_css()
 
 # --------------------------------------------------------------------------
-# SIDEBAR
+# SIDEBAR (shared across every page — see utils/styling.render_sidebar)
 # --------------------------------------------------------------------------
-with st.sidebar:
-    st.markdown(
-        f"""
-        <div style="text-align:center;padding:10px 0 18px 0;">
-            <div style="font-weight:800;font-size:1.05rem;color:{COLORS['text_primary']};">
-                PREDICTIVE MAINTENANCE
-            </div>
-            <div style="font-size:0.72rem;color:{COLORS['accent_blue_light']};
-                        letter-spacing:0.1em;">BEARING FAULT DIAGNOSTICS</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("---")
-    st.caption("SYSTEM STATUS")
-    registry = load_all_models()
-    n_ok = len(registry["models"])
-    n_err = len(registry["errors"])
-    if n_err == 0:
-        st.success(f" {n_ok}/6 models loaded")
-    else:
-        st.warning(f" {n_ok}/6 models loaded, {n_err} failed")
-        with st.expander("Load errors"):
-            for name, msg in registry["errors"].items():
-                st.caption(f"**{name}**: {msg}")
-    st.markdown("---")
-    st.caption("NAVIGATION")
-    st.page_link("app.py", label="Executive Dashboard")
-    st.page_link("pages/1_Model_Comparison.py", label="Model Comparison")
-    st.page_link("pages/2_Live_Prediction.py", label="Live Prediction")
-    st.page_link("pages/4_Maintenance_Recommendations.py", label="Maintenance Recs")
-    st.page_link("pages/5_Dataset_Explorer.py", label="Dataset Explorer")
-    st.page_link("pages/6_Model_Performance.py", label="Model Performance")
-    st.page_link("pages/7_About.py", label="About")
+render_sidebar(active="app")
 
 # --------------------------------------------------------------------------
 # HEADER
@@ -72,6 +38,21 @@ with st.sidebar:
 page_header(
     "Executive Dashboard",
     "Real-time overview of the six-model bearing fault diagnosis system"
+)
+
+st.markdown(
+    f"""
+    <div class="panel-card" style="margin-bottom:22px;">
+        <b>{APP_NAME}</b> is a production-style monitoring console built around the
+        <b>Case Western Reserve University (CWRU) Bearing Data Center</b> dataset the
+        standard benchmark for rolling-element bearing fault detection. It compares
+        six deep-learning and meta-learning models side by side
+        <b>2D CNN, LSTM, Transformer, MAML, Meta-SGD and FBCL</b> spanning both
+        traditional supervised deep learning and meta-continual-learning approaches
+        to bearing fault classification and predictive maintenance.
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 metrics = load_metrics()
@@ -88,13 +69,23 @@ with c1:
 with c2:
     kpi_card("Best Performing Model", best["model_name"], f"Rank #1 · avg score {best['average_score']:.4f}")
 with c3:
-    # Check if rounded accuracy meets target (rounding to nearest whole number)
-    rounded_accuracy = round(best['accuracy'] * 100)
-    target_met = rounded_accuracy >= TARGET_ACCURACY * 100
-    kpi_card("Highest Accuracy", f"{best['accuracy']*100:.2f}%",
-              f"Target ≥ {TARGET_ACCURACY*100:.0f}%",
-              delta="Target met" if target_met else "Below target",
-              delta_positive=target_met)
+    # Compare the displayed (rounded) accuracy against the displayed target.
+    displayed_accuracy = round(best["accuracy"] * 100)
+    displayed_target = round(TARGET_ACCURACY * 100)
+
+    target_met = displayed_accuracy >= displayed_target
+
+    delta_label = "Target met" if target_met else (
+        f"{displayed_target - displayed_accuracy}% below target"
+    )
+
+    kpi_card(
+        "Highest Accuracy",
+        f"{best['accuracy'] * 100:.2f}%",
+        f"Target ≥ {TARGET_ACCURACY * 100:.0f}%",
+        delta=delta_label,
+        delta_positive=target_met
+    )
 with c4:
     kpi_card("Number of Classes", str(N_CLASSES), "10 bearing health states")
 

@@ -30,10 +30,12 @@ for _d in (CHARTS_DIR, REPORTS_DIR, OUTPUTS_DIR, LOGS_DIR):
 METRICS_CSV = DATA_DIR / "model_metrics.csv"
 
 # --------------------------------------------------------------------------
-# PROJECT METADATA  (Page 8 - About)
+# PROJECT METADATA  (About page)
 # --------------------------------------------------------------------------
+APP_NAME = "Industrial Predictive Maintenance"
 PROJECT_TITLE = "Industrial Predictive Maintenance System for Bearing Fault Diagnosis Using Advanced Deep Learning Models"
-PROJECT_SHORT_TITLE = "Bearing Fault Predictive Maintenance Dashboard"
+PROJECT_SHORT_TITLE = "Industrial Predictive Maintenance"
+DESIGNER_CREDIT = "CHEE WEI RONG"
 PROJECT_DESCRIPTION = (
     "A dual-path, interpretable machine learning system for diagnosing rolling-element "
     "bearing faults from vibration-derived statistical features. This dashboard packages "
@@ -257,3 +259,16 @@ RISK_COLORS = {
 }
 
 PLOTLY_TEMPLATE = "plotly_dark"
+
+# --------------------------------------------------------------------------
+# LLM REASONING LAYER  (see utils/llm_assistant.py)
+# --------------------------------------------------------------------------
+# No API key is ever hard-coded here. The dashboard reads a key (if present)
+# from environment variables or .streamlit/secrets.toml at runtime:
+#   ANTHROPIC_API_KEY  -> preferred provider
+#   OPENAI_API_KEY     -> used only if ANTHROPIC_API_KEY is absent
+# If neither is configured, the LLM features fall back to clearly-labelled
+# rule-based / template responses grounded in this dashboard's real data.
+# Model name is overridable via the DASHBOARD_LLM_MODEL env var / secret.
+LLM_DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
+LLM_DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
