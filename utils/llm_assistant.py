@@ -141,72 +141,44 @@ User request:
 
 
 def call_llm(system: str, user: str) -> tuple[Optional[str], str]:
-    """
-    Attempts a real, live LLM call to Groq if an API key is configured,
-    falling back to Gemini if available.
-
-    Returns:
-        (response_text, mode)
-
-        "live"     = real API call succeeded
-        "template" = no API key configured or API call failed
-
-    API errors are printed to the terminal so they can be diagnosed.
-    The API key itself is NEVER printed.
-    """
-
     provider = get_active_provider()
 
-    # --------------------------------------------------------------
-    # Check whether an API key was found
-    # --------------------------------------------------------------
-    if provider is None:
-        print("========================================")
-        print("LLM ERROR: No API key detected.")
-        print("========================================")
-        print("Expected GROQ_API_KEY or GEMINI_API_KEY in:")
-        print("  .streamlit/secrets.toml")
-        print("or as an environment variable.")
-        print("========================================")
-        return None, "template"
+    print("========== LLM DEBUG ==========")
+    print("GROQ KEY FOUND:", bool(_get_secret("GROQ_API_KEY")))
+    print("GEMINI KEY FOUND:", bool(_get_secret("GEMINI_API_KEY")))
+    print("ACTIVE PROVIDER:", provider)
+    print(
+        "MODEL:",
+        _get_secret("DASHBOARD_LLM_MODEL") or "openai/gpt-oss-20b"
+    )
+    print("USER MESSAGE LENGTH:", len(user))
+    print("================================")
 
-    # --------------------------------------------------------------
-    # Provider detected
-    # --------------------------------------------------------------
-    print("========================================")
-    print(f"LLM PROVIDER DETECTED: {provider}")
-    print("========================================")
+    if not provider:
+        print("LLM ERROR: No API key detected.")
+        return None, "template"
 
     try:
         if provider == "groq":
-            response = _call_groq(system, user)
+            text = _call_groq(system, user)
             print("LLM SUCCESS: Groq response received.")
+            return text, "groq"
+
         elif provider == "gemini":
-            response = _call_gemini(system, user)
+            text = _call_gemini(system, user)
             print("LLM SUCCESS: Gemini response received.")
+            return text, "gemini"
+
         else:
-            raise ValueError(f"Unknown provider: {provider}")
-        
-        return response, "live"
+            print("LLM ERROR: Unknown provider:", provider)
+            return None, "template"
 
     except Exception as e:
-
-        # ----------------------------------------------------------
-        # IMPORTANT:
-        # Print the REAL error instead of silently hiding it.
-        # NEVER print the API key.
-        # ----------------------------------------------------------
-        print("")
-        print("========================================")
-        print("           LLM API ERROR")
-        print("========================================")
-        print(f"Provider: {provider}")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {e}")
-        print("========================================")
-        print("The dashboard is falling back to template mode.")
-        print("========================================")
-        print("")
+        print("========== LLM API ERROR ==========")
+        print("Provider:", provider)
+        print("Error type:", type(e).__name__)
+        print("Error:", str(e))
+        print("===================================")
 
         return None, "template"
 
