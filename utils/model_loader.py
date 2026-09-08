@@ -265,11 +265,6 @@ def recreate_model_from_name(model_name):
     # Try exact match
     if model_name in creators:
         model = creators[model_name]()
-        model.compile(
-            optimizer='adam',
-            loss='categorical_crossentropy',
-            metrics=['accuracy']
-        )
         return model
     
     # Try partial match — handles filename variants that weren't in the
@@ -277,11 +272,6 @@ def recreate_model_from_name(model_name):
     for key, creator in creators.items():
         if key in model_name or model_name in key:
             model = creator()
-            model.compile(
-                optimizer='adam',
-                loss='categorical_crossentropy',
-                metrics=['accuracy']
-            )
             return model
     
     # No architecture recognised for this filename — caller treats this as
@@ -336,44 +326,99 @@ class ModelWrapper:
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """
         Get prediction probabilities from the model.
-        Returns an (n_samples, N_CLASSES) probability matrix regardless of
-        framework — Keras models return probabilities directly (softmax
-        output layer), while PyTorch models return raw logits that this
-        method runs through softmax itself.
+
+        Keras:
+            CNN -> (n, 5, 4, 1)
+            LSTM -> (n, 1, 19)
+            Transformer -> (n, 19, 1)
+
+        PyTorch:
+            All three models -> (n, 19)
         """
         X = np.asarray(X, dtype=np.float32)
-        
+
+        # ================================================================
+        # KERAS MODELS
+        # ================================================================
         if self.framework == "keras":
-            try:
-                Xr = self._reshape_for_model(X)
-                probs = self.model.predict(Xr, verbose=0)
-                return np.asarray(probs)
-            except Exception as e:
-                # Reshaping assumptions can be wrong for an edge-case
-                # architecture — fall back to feeding the flat array
-                # straight in before giving up entirely.
-                print(f"Keras prediction error for {self.name}: {e}")
+
+            # ------------------------------------------------------------
+            # TRANSFORMER
+            # ------------------------------------------------------------
+            if self.name == "Transformer":
                 try:
-                    probs = self.model.predict(X, verbose=0)
-                    return np.asarray(probs)
-                except:
+                    # The Transformer expects exactly:
+                    # (batch_size, 19, 1)
+                    Xr = X.reshape((-1, 19, 1))
+
+                    # Convert to an explicit TensorFlow tensor.
+                    Xr = tf.convert_to_tensor(Xr, dtype=tf.float32)
+
+                    # Tell TensorFlow the exact expected shape.
+                    Xr = tf.ensure_shape(Xr, [None, 19, 1])
+
+                    # Run inference.
+                    probs = self.model(Xr, training=False)
+
+                    # Convert TensorFlow tensor to NumPy.
+                    probs = np.asarray(probs.numpy(), dtype=np.float32)
+
+                    # Make sure the model returned 10 class probabilities.
+                    if probs.ndim != 2 or probs.shape[1] != N_CLASSES:
+                        raise ValueError(
+                            f"Transformer returned unexpected shape: {probs.shape}"
+                        )
+
+                    return probs
+
+                except Exception as e:
+                    print(
+                        f"❌ Transformer inference failed: "
+                        f"{type(e).__name__}: {e}"
+                    )
                     raise
 
-        # PyTorch models — imported lazily so torch is only required when
-        # a PyTorch-based model is actually being used.
+            # ------------------------------------------------------------
+            # CNN / LSTM
+            # ------------------------------------------------------------
+            try:
+                Xr = self._reshape_for_model(X)
+
+                Xr = tf.convert_to_tensor(Xr, dtype=tf.float32)
+
+                probs = self.model(Xr, training=False)
+
+                return np.asarray(probs.numpy(), dtype=np.float32)
+
+            except Exception as e:
+                print(
+                    f"❌ Keras prediction error for {self.name}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                raise
+
+        # ================================================================
+        # PYTORCH MODELS
+        # ================================================================
         import torch
+
         Xt = torch.tensor(X, dtype=torch.float32)
-        self.model.eval()  # Disable dropout/BatchNorm training-mode behaviour for inference.
+
+        self.model.eval()
+
         with torch.no_grad():
-            # A couple of the meta-learning architectures need extra
-            # forward-pass arguments beyond the plain input tensor.
+
             if self.name == "Feature-Based Contrastive Learning (FBCL)":
                 logits = self.model(Xt, use_boosting=True)
+
             elif self.name == "Model-Agnostic Meta-Learning (MAML)":
                 logits = self.model(Xt, mask=None)
+
             else:
                 logits = self.model(Xt)
+
             probs = torch.softmax(logits, dim=1).cpu().numpy()
+
         return probs
 
     def predict(self, X: np.ndarray):
