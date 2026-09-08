@@ -503,7 +503,8 @@ def load_all_models() -> dict:
             print(f"\n📦 Loading {name}...")
             
             if cfg["framework"] == "keras":
-                model = load_keras_model_compatible(str(cfg["file"]))
+                # Use the cached version of the loader
+                model = load_keras_model(str(cfg["file"]))
                 wrappers[name] = ModelWrapper(name, "keras", model)
                 print(f"✅ {name} loaded successfully")
                 

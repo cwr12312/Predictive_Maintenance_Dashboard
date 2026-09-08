@@ -37,6 +37,31 @@ page_header("Live Prediction", "Run real inference with any of the six trained m
 if "prediction_history" not in st.session_state:
     st.session_state.prediction_history = []
 
+# ---------------------------------------------------------
+# CACHE LIVE PREDICTION RESULTS ACROSS STREAMLIT RERUNS
+# ---------------------------------------------------------
+if "live_preds" not in st.session_state:
+    st.session_state.live_preds = None
+
+if "live_probs" not in st.session_state:
+    st.session_state.live_probs = None
+
+if "live_prediction_time" not in st.session_state:
+    st.session_state.live_prediction_time = None
+
+if "prediction_logged" not in st.session_state:
+    st.session_state.prediction_logged = False
+
+if "xai_cache" not in st.session_state:
+    st.session_state.xai_cache = None
+
+# Track which model produced the current prediction
+if "live_model_name" not in st.session_state:
+    st.session_state.live_model_name = None
+
+# Track the last selected model to detect changes
+if "last_selected_model" not in st.session_state:
+    st.session_state.last_selected_model = None
 
 # Persisted across reruns so that clicking a *secondary* button inside the
 # results section (Generate Report, Root Cause, etc.) doesn't wipe out the
@@ -331,9 +356,15 @@ def render_xai_explanation(
     # grounded template) to translate into technician-friendly language.
     # ------------------------------------------------------------------
     top_for_ai = [(r["Feature"], r["SHAP Value"]) for _, r in top_features.head(5).iterrows()]
-    plain_text, plain_mode = llm_assistant.explain_prediction_plain_language(
-        predicted_display, confidence, top_for_ai
-    )
+    
+    # Use cached XAI to prevent Gemini calls on every rerun
+    if st.session_state.xai_cache is None:
+        st.session_state.xai_cache = llm_assistant.explain_prediction_plain_language(
+            predicted_display, confidence, top_for_ai
+        )
+    
+    plain_text, plain_mode = st.session_state.xai_cache
+    
     st.markdown(f"""
     <div style="font-size: 15px; line-height: 1.7; color: #E0E0E0; margin: 10px 0 20px 0; padding: 18px; background: rgba(255,255,255,0.05); border-radius: 8px;">
         {plain_text}
@@ -532,6 +563,22 @@ def _extract_shap_array(shap_values, class_index):
 # --------------------------------------------------------------------------
 section_title("1 · Select a Model")
 model_name = st.selectbox("Model", MODEL_NAMES, index=1, label_visibility="collapsed")
+
+# Clear old prediction whenever the selected model changes
+if st.session_state.last_selected_model is None:
+    st.session_state.last_selected_model = model_name
+elif st.session_state.last_selected_model != model_name:
+    st.session_state.last_selected_model = model_name
+    
+    st.session_state.live_preds = None
+    st.session_state.live_probs = None
+    st.session_state.live_prediction_time = None
+    st.session_state.live_engineered_df = None
+    st.session_state.live_scaled = None
+    st.session_state.prediction_logged = False
+    st.session_state.xai_cache = None
+    st.session_state.live_model_name = None
+
 wrapper = get_model(model_name)  # Cached load of the selected model's weights/architecture.
 errors = get_load_errors()
 
@@ -579,6 +626,27 @@ if input_mode == "Manual Feature Entry":
         # Engineer the remaining 10 features + scale, then persist to
         # session_state so results survive later reruns (see note at top of file).
         st.session_state.live_engineered_df, st.session_state.live_scaled = preprocess_manual_entry(values)
+        
+        # Run inference ONLY when the user actually clicks the button
+        start_time = time.perf_counter()
+        
+        preds, probs = wrapper.predict(st.session_state.live_scaled)
+        
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        
+        # Save prediction results so Streamlit reruns don't run inference again
+        st.session_state.live_preds = preds
+        st.session_state.live_probs = probs
+        st.session_state.live_prediction_time = elapsed_ms
+        
+        # Remember which model produced these results
+        st.session_state.live_model_name = model_name
+        
+        # This is a NEW prediction, so allow it to be logged once
+        st.session_state.prediction_logged = False
+        
+        # Clear previous XAI result
+        st.session_state.xai_cache = None
 
 else:
     # --- LIVE PREDICTION: FILE-UPLOAD / BATCH INPUT PATH -------------------
@@ -602,6 +670,27 @@ else:
             st.dataframe(df_raw.head(10), use_container_width=True)
             if st.button("Run Batch Prediction", type="primary", key="csv_predict"):
                 st.session_state.live_engineered_df, st.session_state.live_scaled = preprocess_csv_upload(df_raw)
+                
+                # Run inference ONLY when the user actually clicks the button
+                start_time = time.perf_counter()
+                
+                preds, probs = wrapper.predict(st.session_state.live_scaled)
+                
+                elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+                
+                # Save prediction results so Streamlit reruns don't run inference again
+                st.session_state.live_preds = preds
+                st.session_state.live_probs = probs
+                st.session_state.live_prediction_time = elapsed_ms
+                
+                # Remember which model produced these results
+                st.session_state.live_model_name = model_name
+                
+                # This is a NEW prediction batch, so allow it to be logged once
+                st.session_state.prediction_logged = False
+                
+                # Clear previous XAI result
+                st.session_state.xai_cache = None
         except Exception as e:
             # Malformed file, wrong columns, unsupported format variant, etc.
             # — surface the real error rather than silently failing.
@@ -620,190 +709,223 @@ scaled = st.session_state.live_scaled
 # 19-feature input matrix (from either the manual-entry or file-upload
 # path above), we hand it to the selected model wrapper and render either
 # a single-sample or a batch results view depending on how many rows there are.
+# 
+# IMPORTANT FIX: We now use the cached predictions (st.session_state.live_preds
+# and st.session_state.live_probs) instead of running wrapper.predict() on
+# every Streamlit rerun.
 # --------------------------------------------------------------------------
 if scaled is not None:
     section_title("3 · Prediction Results")
-    # Time the raw model call (excludes preprocessing) to report inference latency.
-    t0 = time.perf_counter()
-    preds, probs = wrapper.predict(scaled)  # preds: predicted class index per row; probs: full per-class probability matrix.
-    elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    per_sample_ms = elapsed_ms / max(1, scaled.shape[0])
+    
+    # Use the already-computed prediction results from session_state
+    preds = st.session_state.live_preds
+    probs = st.session_state.live_probs
+    
+    # Only proceed if we have actual prediction results
+    if preds is not None and probs is not None:
+        # Get the prediction time from session_state
+        elapsed_ms = st.session_state.live_prediction_time
+        per_sample_ms = elapsed_ms / max(1, scaled.shape[0]) if elapsed_ms is not None else 0.0
 
-    is_batch = scaled.shape[0] > 1  # More than one row => batch/CSV-style results view.
+        # Verify that the current model matches the one that made the prediction
+        if st.session_state.live_model_name != model_name:
+            st.warning(f"⚠️ The displayed prediction was made with **{st.session_state.live_model_name}**, "
+                      f"but **{model_name}** is currently selected. Click 'Run Prediction' again to get "
+                      f"a prediction from {model_name}.")
+            # Don't display the old prediction to avoid confusion
+            st.stop()
 
-    if not is_batch:
-        # ------------------------------------------------------------
-        # SINGLE-SAMPLE RESULT (manual entry, or a 1-row upload)
-        # ------------------------------------------------------------
-        pred_idx = int(preds[0])
-        
-        # Get class name safely using the helper function
-        predicted_display = get_class_display_name(pred_idx)
-        
-        # Get the class name for the recommendation
-        if 0 <= pred_idx < len(CLASS_NAMES):
-            pred_class = CLASS_NAMES[pred_idx]
-        else:
-            pred_class = f"Class_{pred_idx}"
+        is_batch = scaled.shape[0] > 1  # More than one row => batch/CSV-style results view.
+
+        if not is_batch:
+            # ------------------------------------------------------------
+            # SINGLE-SAMPLE RESULT (manual entry, or a 1-row upload)
+            # ------------------------------------------------------------
+            pred_idx = int(preds[0])
             
-        # Confidence = the model's own predicted probability for the class it chose.
-        confidence = float(probs[0, pred_idx] if pred_idx < len(probs[0]) else probs[0][0])
-        # Look up the rule-based maintenance guidance (severity/risk/actions)
-        # for this fault class + confidence — see utils/maintenance.py.
-        rec = get_recommendation(pred_class, confidence)
-
-        # Row of top-level KPI metrics for this single prediction: what fault
-        # was predicted, how confident the model is, how severe it is, and
-        # the resulting maintenance risk level.
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric("Predicted Bearing Fault", rec["display_name"])
-        with c2:
-            st.metric("Prediction Confidence", f"{confidence*100:.2f}%")
-        with c3:
-            st.metric("Fault Severity", rec["severity"])
-        with c4:
-            st.metric("Risk Level", rec["risk"])
-
-        # Second KPI row: operational/performance context for this prediction
-        # (how fast it ran, which model produced it).
-        c5, c6, c7 = st.columns(3)
-        with c5:
-            st.metric("Prediction Time", f"{per_sample_ms:.2f} ms")
-        with c6:
-            st.metric("Model Used", model_name)
-        with c7:
-            st.metric("Probability (Top Class)", f"{confidence*100:.2f}%")
-
-        gcol, pcol = st.columns([1, 1.4])
-        with gcol:
-            # Speedometer-style gauge: green/amber/red banding by confidence level.
-            section_title("Confidence Gauge")
-            gauge_color = COLORS["accent_green"] if confidence >= 0.8 else (
-                COLORS["accent_amber"] if confidence >= 0.5 else COLORS["accent_red"])
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number", value=confidence * 100,
-                number={"suffix": "%"},
-                gauge={"axis": {"range": [0, 100]}, "bar": {"color": gauge_color},
-                       "steps": [{"range": [0, 50], "color": "#2A1B1B"},
-                                 {"range": [50, 80], "color": "#2A2416"},
-                                 {"range": [80, 100], "color": "#16281C"}]},
-            ))
-            fig.update_layout(template=PLOTLY_TEMPLATE, height=300, margin=dict(l=20, r=20, t=30, b=10),
-                               paper_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig, use_container_width=True)
-
-        with pcol:
-            # Horizontal bar chart of the model's full probability distribution
-            # across all 10 classes (not just the winning one).
-            section_title("Prediction Probability Chart")
-            prob_df = pd.DataFrame({"Class": [CLASS_DISPLAY_NAMES.get(c, c) for c in CLASS_NAMES],
-                                     "Probability": probs[0] * 100})
-            prob_df = prob_df.sort_values("Probability", ascending=True)
-            fig2 = go.Figure(go.Bar(x=prob_df["Probability"], y=prob_df["Class"], orientation="h",
-                                     marker_color=COLORS["accent_blue"]))
-            fig2.update_layout(template=PLOTLY_TEMPLATE, height=300, margin=dict(l=10, r=10, t=10, b=10),
-                                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                                xaxis_title="Probability (%)")
-            st.plotly_chart(fig2, use_container_width=True)
-
-        # ------------------------------------------------------------------
-        # XAI EXPLANATION - SINGLE PREDICTION
-        # ------------------------------------------------------------------
-        render_xai_explanation(
-            model_name=model_name,
-            wrapper=wrapper,
-            scaled_sample=scaled[:1],
-            raw_features=engineered_df,
-            predicted_class=pred_idx,
-            confidence=confidence,
-        )
-
-        # Log this single prediction to the session history table at the bottom of the page.
-        st.session_state.prediction_history.insert(0, {
-            "Model": model_name, "Prediction": rec["display_name"],
-            "Confidence": f"{confidence*100:.2f}%", "Risk": rec["risk"],
-            "Time (ms)": f"{per_sample_ms:.2f}",
-        })
-
-    else:
-        # --------------------------------------------------------------
-        # BATCH / MULTI-ROW RESULTS (multiple rows were uploaded)
-        # Same underlying predict() call as the single-sample path above,
-        # but every row gets its own predicted class, confidence, and
-        # maintenance risk — rendered as one big results table plus a
-        # class-distribution chart, instead of KPI cards for just one row.
-        # --------------------------------------------------------------
-        pred_classes = []
-        for i in preds:
-            idx = int(i)
-            if 0 <= idx < len(CLASS_NAMES):
-                pred_classes.append(CLASS_NAMES[idx])
+            # Get class name safely using the helper function
+            predicted_display = get_class_display_name(pred_idx)
+            
+            # Get the class name for the recommendation
+            if 0 <= pred_idx < len(CLASS_NAMES):
+                pred_class = CLASS_NAMES[pred_idx]
             else:
-                pred_classes.append(f"Class_{idx}")
-        
-        # Get confidence properly — the predicted class's own probability for each row.
-        conf = []
-        for i, p in enumerate(preds):
-            idx = int(p)
-            try:
-                if idx < len(probs[i]):
-                    conf.append(probs[i, idx])
-                else:
-                    conf.append(probs[i][0])
-            except:
-                conf.append(probs[i][0])
-        
-        # Build the results table: original uploaded features + predicted
-        # class, confidence, and risk level for every row.
-        result_df = engineered_df.copy()
-        result_df["Predicted Class"] = [CLASS_DISPLAY_NAMES.get(c, c) for c in pred_classes]
-        result_df["Confidence"] = (np.array(conf) * 100).round(2)
-        result_df["Risk"] = [get_recommendation(c, cf)["risk"] for c, cf in zip(pred_classes, conf)]
+                pred_class = f"Class_{pred_idx}"
+                
+            # Confidence = the model's own predicted probability for the class it chose.
+            confidence = float(probs[0, pred_idx] if pred_idx < len(probs[0]) else probs[0][0])
+            # Look up the rule-based maintenance guidance (severity/risk/actions)
+            # for this fault class + confidence — see utils/maintenance.py.
+            rec = get_recommendation(pred_class, confidence)
 
-        st.success(f" Classified {len(result_df)} samples with **{model_name}** "
-                   f"in {elapsed_ms:.1f} ms total ({per_sample_ms:.2f} ms/sample).")
-        st.dataframe(result_df, use_container_width=True)
+            # Row of top-level KPI metrics for this single prediction: what fault
+            # was predicted, how confident the model is, how severe it is, and
+            # the resulting maintenance risk level.
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("Predicted Bearing Fault", rec["display_name"])
+            with c2:
+                st.metric("Prediction Confidence", f"{confidence*100:.2f}%")
+            with c3:
+                st.metric("Fault Severity", rec["severity"])
+            with c4:
+                st.metric("Risk Level", rec["risk"])
 
-        # Class-distribution bar chart across the whole uploaded batch.
-        dist = pd.Series(pred_classes).value_counts().reset_index()
-        dist.columns = ["Class", "Count"]
-        fig3 = px.bar(dist, x="Class", y="Count", color="Class", template=PLOTLY_TEMPLATE)
-        fig3.update_layout(height=350, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                            showlegend=False)
-        st.plotly_chart(fig3, use_container_width=True)
+            # Second KPI row: operational/performance context for this prediction
+            # (how fast it ran, which model produced it).
+            c5, c6, c7 = st.columns(3)
+            with c5:
+                st.metric("Prediction Time", f"{per_sample_ms:.2f} ms")
+            with c6:
+                st.metric("Model Used", model_name)
+            with c7:
+                st.metric("Probability (Top Class)", f"{confidence*100:.2f}%")
 
-        csv_bytes = result_df.to_csv(index=False).encode("utf-8")
-        st.download_button(" Download Predictions CSV", csv_bytes, "predictions.csv", "text/csv")
+            gcol, pcol = st.columns([1, 1.4])
+            with gcol:
+                # Speedometer-style gauge: green/amber/red banding by confidence level.
+                section_title("Confidence Gauge")
+                gauge_color = COLORS["accent_green"] if confidence >= 0.8 else (
+                    COLORS["accent_amber"] if confidence >= 0.5 else COLORS["accent_red"])
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number", value=confidence * 100,
+                    number={"suffix": "%"},
+                    gauge={"axis": {"range": [0, 100]}, "bar": {"color": gauge_color},
+                           "steps": [{"range": [0, 50], "color": "#2A1B1B"},
+                                     {"range": [50, 80], "color": "#2A2416"},
+                                     {"range": [80, 100], "color": "#16281C"}]},
+                ))
+                fig.update_layout(template=PLOTLY_TEMPLATE, height=300, margin=dict(l=20, r=20, t=30, b=10),
+                                   paper_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, use_container_width=True)
 
-        # ------------------------------------------------------------------
-        # XAI EXPLANATION - BATCH PREDICTIONS (Only show for Row 1)
-        # ------------------------------------------------------------------
-        if len(result_df) > 0:
-            st.markdown("---")
-            st.markdown(f"### Row 1: {result_df.iloc[0]['Predicted Class']}")
-            
-            selected_scaled = scaled[0:1]
-            selected_pred = preds[0]
-            selected_conf = conf[0]
-            selected_raw = result_df.iloc[0:1]
+            with pcol:
+                # Horizontal bar chart of the model's full probability distribution
+                # across all 10 classes (not just the winning one).
+                section_title("Prediction Probability Chart")
+                prob_df = pd.DataFrame({"Class": [CLASS_DISPLAY_NAMES.get(c, c) for c in CLASS_NAMES],
+                                         "Probability": probs[0] * 100})
+                prob_df = prob_df.sort_values("Probability", ascending=True)
+                fig2 = go.Figure(go.Bar(x=prob_df["Probability"], y=prob_df["Class"], orientation="h",
+                                         marker_color=COLORS["accent_blue"]))
+                fig2.update_layout(template=PLOTLY_TEMPLATE, height=300, margin=dict(l=10, r=10, t=10, b=10),
+                                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                    xaxis_title="Probability (%)")
+                st.plotly_chart(fig2, use_container_width=True)
 
+            # ------------------------------------------------------------------
+            # XAI EXPLANATION - SINGLE PREDICTION
+            # ------------------------------------------------------------------
             render_xai_explanation(
                 model_name=model_name,
                 wrapper=wrapper,
-                scaled_sample=selected_scaled,
-                raw_features=selected_raw,
-                predicted_class=selected_pred,
-                confidence=selected_conf,
+                scaled_sample=scaled[:1],
+                raw_features=engineered_df,
+                predicted_class=pred_idx,
+                confidence=confidence,
             )
 
-        # Log every row of the batch into the session history table.
-        for c, cf in zip(pred_classes, conf):
-            st.session_state.prediction_history.insert(0, {
-                "Model": model_name, "Prediction": CLASS_DISPLAY_NAMES.get(c, c),
-                "Confidence": f"{cf*100:.2f}%",
-                "Risk": get_recommendation(c, cf)["risk"], "Time (ms)": f"{per_sample_ms:.2f}",
-            })
+            # Log this single prediction to the session history table at the bottom of the page.
+            # Only log if this prediction hasn't been logged yet (prevents duplicates on rerun)
+            if not st.session_state.prediction_logged:
+                st.session_state.prediction_history.insert(0, {
+                    "Model": model_name, "Prediction": rec["display_name"],
+                    "Confidence": f"{confidence*100:.2f}%", "Risk": rec["risk"],
+                    "Time (ms)": f"{per_sample_ms:.2f}",
+                })
+                
+                # Cap history to keep only the latest 50 records
+                st.session_state.prediction_history = st.session_state.prediction_history[:50]
+                
+                # Prevent duplicate history entries on Streamlit reruns
+                st.session_state.prediction_logged = True
+
+        else:
+            # --------------------------------------------------------------
+            # BATCH / MULTI-ROW RESULTS (multiple rows were uploaded)
+            # Same underlying predict() call as the single-sample path above,
+            # but every row gets its own predicted class, confidence, and
+            # maintenance risk — rendered as one big results table plus a
+            # class-distribution chart, instead of KPI cards for just one row.
+            # --------------------------------------------------------------
+            pred_classes = []
+            for i in preds:
+                idx = int(i)
+                if 0 <= idx < len(CLASS_NAMES):
+                    pred_classes.append(CLASS_NAMES[idx])
+                else:
+                    pred_classes.append(f"Class_{idx}")
+            
+            # Get confidence properly — the predicted class's own probability for each row.
+            conf = []
+            for i, p in enumerate(preds):
+                idx = int(p)
+                try:
+                    if idx < len(probs[i]):
+                        conf.append(probs[i, idx])
+                    else:
+                        conf.append(probs[i][0])
+                except:
+                    conf.append(probs[i][0])
+            
+            # Build the results table: original uploaded features + predicted
+            # class, confidence, and risk level for every row.
+            result_df = engineered_df.copy()
+            result_df["Predicted Class"] = [CLASS_DISPLAY_NAMES.get(c, c) for c in pred_classes]
+            result_df["Confidence"] = (np.array(conf) * 100).round(2)
+            result_df["Risk"] = [get_recommendation(c, cf)["risk"] for c, cf in zip(pred_classes, conf)]
+
+            st.success(f" Classified {len(result_df)} samples with **{model_name}** "
+                       f"in {elapsed_ms:.1f} ms total ({per_sample_ms:.2f} ms/sample).")
+            st.dataframe(result_df, use_container_width=True)
+
+            # Class-distribution bar chart across the whole uploaded batch.
+            dist = pd.Series(pred_classes).value_counts().reset_index()
+            dist.columns = ["Class", "Count"]
+            fig3 = px.bar(dist, x="Class", y="Count", color="Class", template=PLOTLY_TEMPLATE)
+            fig3.update_layout(height=350, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                showlegend=False)
+            st.plotly_chart(fig3, use_container_width=True)
+
+            csv_bytes = result_df.to_csv(index=False).encode("utf-8")
+            st.download_button(" Download Predictions CSV", csv_bytes, "predictions.csv", "text/csv")
+
+            # ------------------------------------------------------------------
+            # XAI EXPLANATION - BATCH PREDICTIONS (Only show for Row 1)
+            # ------------------------------------------------------------------
+            if len(result_df) > 0:
+                st.markdown("---")
+                st.markdown(f"### Row 1: {result_df.iloc[0]['Predicted Class']}")
+                
+                selected_scaled = scaled[0:1]
+                selected_pred = preds[0]
+                selected_conf = conf[0]
+                selected_raw = result_df.iloc[0:1]
+
+                render_xai_explanation(
+                    model_name=model_name,
+                    wrapper=wrapper,
+                    scaled_sample=selected_scaled,
+                    raw_features=selected_raw,
+                    predicted_class=selected_pred,
+                    confidence=selected_conf,
+                )
+
+            # Log every row of the batch into the session history table.
+            # Only log if this prediction hasn't been logged yet (prevents duplicates on rerun)
+            if not st.session_state.prediction_logged:
+                for c, cf in zip(pred_classes, conf):
+                    st.session_state.prediction_history.insert(0, {
+                        "Model": model_name, "Prediction": CLASS_DISPLAY_NAMES.get(c, c),
+                        "Confidence": f"{cf*100:.2f}%",
+                        "Risk": get_recommendation(c, cf)["risk"], "Time (ms)": f"{per_sample_ms:.2f}",
+                    })
+                
+                # Cap history to keep only the latest 50 records
+                st.session_state.prediction_history = st.session_state.prediction_history[:50]
+                
+                # Prevent duplicate history entries on Streamlit reruns
+                st.session_state.prediction_logged = True
 
 # --------------------------------------------------------------------------
 # NATURAL LANGUAGE QUERYING

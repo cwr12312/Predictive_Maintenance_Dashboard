@@ -174,47 +174,155 @@ def _render_agent_panel():
     other LLM feature in this dashboard — no second agent/backend exists.
     """
     if not st.session_state.get("show_agent_panel", False):
-        return                                                             # panel closed -> render nothing
+        return
 
-    from utils.llm_assistant import chat_with_agent  # local import avoids circular import
+    from utils.llm_assistant import chat_with_agent
 
-    with st.container(key="manage_agent_panel"):                           # the floating panel's outer container (styled as fixed-position overlay in CSS)
-        head_l, head_r = st.columns([8, 1])                                  # header row: title on the left, close button on the right
+    # ==============================================================
+    # FLOATING MANAGE AGENT PANEL
+    # ==============================================================
+    with st.container(key="manage_agent_panel"):
+
+        # Header
+        head_l, head_r = st.columns([8, 1])
+
         with head_l:
-            st.markdown('<div class="agent-panel-header">Manage Agent</div>', unsafe_allow_html=True)
-        with head_r:
-            close_clicked = st.button("✕", key="agent_panel_close_btn")        # close ("X") button for the panel
+            st.markdown(
+                '<div class="agent-panel-header">Manage Agent</div>',
+                unsafe_allow_html=True,
+            )
 
-        with st.container(key="agent_panel_body", height=400, border=False):   # scrollable message history area
-            history = st.session_state.agent_chat_history
+        with head_r:
+            close_clicked = st.button(
+                "✕",
+                key="agent_panel_close_btn",
+            )
+
+        # ==========================================================
+        # CHAT HISTORY
+        # ==========================================================
+        with st.container(
+            key="agent_panel_body",
+            height=400,
+            border=False,
+        ):
+            history = st.session_state.get(
+                "agent_chat_history",
+                [],
+            )
+
             if not history:
                 st.markdown(
-                    '<div class="agent-panel-empty">Ask about model performance, a '
-                    'prediction, or maintenance guidance.</div>',
+                    '<div class="agent-panel-empty">'
+                    'Ask about model performance, a prediction, '
+                    'or maintenance guidance.'
+                    '</div>',
                     unsafe_allow_html=True,
-                )                                                              # placeholder text shown when no messages yet
-            for msg in history:
-                bubble_class = "agent-bubble-user" if msg["role"] == "user" else "agent-bubble-assistant"  # style user vs assistant messages differently
-                safe_text = msg["content"].replace("<", "&lt;").replace(">", "&gt;")  # escape HTML to avoid injection/markup breakage
-                st.markdown(f'<div class="agent-bubble {bubble_class}">{safe_text}</div>', unsafe_allow_html=True)
+                )
 
-        with st.form(key="agent_panel_form", clear_on_submit=True, border=False):  # input row, clears the text box after each send
+            for msg in history:
+                bubble_class = (
+                    "agent-bubble-user"
+                    if msg.get("role") == "user"
+                    else "agent-bubble-assistant"
+                )
+
+                safe_text = (
+                    str(msg.get("content", ""))
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                )
+
+                st.markdown(
+                    f'<div class="agent-bubble {bubble_class}">'
+                    f'{safe_text}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+        # ==========================================================
+        # MESSAGE INPUT
+        # ==========================================================
+        with st.form(
+            key="agent_panel_form",
+            clear_on_submit=True,
+            border=False,
+        ):
             in_col, send_col = st.columns([5, 1])
+
             with in_col:
                 user_msg = st.text_input(
-                    "Message", placeholder="Type your message...",
-                    label_visibility="collapsed", key="agent_panel_msg_input",
-                )                                                              # free-text message input
+                    "Message",
+                    placeholder="Type your message...",
+                    label_visibility="collapsed",
+                )
+
             with send_col:
-                sent = st.form_submit_button("Send", use_container_width=True)    # submit button for the form
+                sent = st.form_submit_button(
+                    "Send",
+                    use_container_width=True,
+                )
 
+    # ==============================================================
+    # CLOSE PANEL
+    # ==============================================================
     if close_clicked:
-        st.session_state.show_agent_panel = False                             # user closed the panel -> hide it
-        st.rerun()                                                              # rerun immediately so the panel disappears without waiting for another interaction
+        st.session_state.show_agent_panel = False
+        st.rerun()
 
+    # ==============================================================
+    # PROCESS MESSAGE
+    # ==============================================================
     if sent and user_msg and user_msg.strip():
-        st.session_state.agent_chat_history.append({"role": "user", "content": user_msg.strip()})  # record the user's message
-        with st.spinner("Thinking..."):
-            reply, _mode = chat_with_agent(st.session_state.agent_chat_history)    # get the assistant's reply from the shared LLM layer
-        st.session_state.agent_chat_history.append({"role": "assistant", "content": reply})  # record the assistant's reply
-        st.rerun()                                                                # rerun so the new messages render immediately
+
+        clean_message = user_msg.strip()
+
+        st.session_state.agent_chat_history.append(
+            {
+                "role": "user",
+                "content": clean_message,
+            }
+        )
+
+        # Maximum 20 stored messages
+        st.session_state.agent_chat_history = (
+            st.session_state.agent_chat_history[-20:]
+        )
+
+        try:
+            with st.spinner("Thinking..."):
+                reply, _mode = chat_with_agent(
+                    st.session_state.agent_chat_history
+                )
+
+            if not reply:
+                reply = (
+                    "I couldn't generate a response right now. "
+                    "Please try again."
+                )
+
+        except Exception as e:
+            print("=" * 60)
+            print("MANAGE AGENT ERROR")
+            print("=" * 60)
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {e}")
+            print("=" * 60)
+
+            reply = (
+                "The Manage Agent could not process that message "
+                "right now. The rest of the dashboard is still available."
+            )
+
+        st.session_state.agent_chat_history.append(
+            {
+                "role": "assistant",
+                "content": str(reply),
+            }
+        )
+
+        st.session_state.agent_chat_history = (
+            st.session_state.agent_chat_history[-20:]
+        )
+
+        st.rerun()
